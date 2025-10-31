@@ -125,11 +125,17 @@ def handle_signup(req: SignupRequest, db: Session):
         raise HTTPException(status_code=400, detail="Username already exists")
     if db.query(User).filter(User.email == req.email).first() is not None:
         raise HTTPException(status_code=400, detail="Email already in use")
+    # First real user becomes Admin (ignore seeded 'guest')
+    try:
+        non_guest_count = db.query(User).filter(User.username != "guest").count()
+    except Exception:
+        non_guest_count = 0
+    plan_value = "Admin" if non_guest_count == 0 else "Guest"
     rec = User(
         username=req.username,
         email=req.email,
         password_hash=hash_password(req.password),
-        plan="Guest",
+        plan=plan_value,
         created_at=int(time.time()),
     )
     db.add(rec)

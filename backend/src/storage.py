@@ -3,6 +3,13 @@ import os
 from pathlib import Path
 from typing import Optional, Tuple
 
+try:
+    from botocore.config import Config  # type: ignore
+    from botocore.exceptions import ClientError  # type: ignore
+except Exception:  # pragma: no cover - botocore optional until S3 enabled
+    Config = None  # type: ignore
+    ClientError = None  # type: ignore
+
 
 class StorageService:
     """Abstract storage service used in production for media objects.
@@ -72,10 +79,36 @@ def get_storage(raw_root: Path) -> StorageService:
             import boto3  # type: ignore
         except Exception as e:
             raise RuntimeError(f"boto3 required for S3 backend: {e}")
+
         bucket = os.environ.get("STORAGE_BUCKET")
-        region = os.environ.get("AWS_REGION")
-        prefix = os.environ.get("STORAGE_PREFIX", "")
-        s3 = boto3.client("s3", region_name=region)
+        if not bucket:
+            raise RuntimeError("STORAGE_BUCKET must be set when STORAGE_BACKEND=s3")
+
+        region = os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION") or "us-east-1"
+        prefix = os.environ.get("STORAGE_PREFIX", "").strip()
+        if prefix:
+            prefix = prefix.lstrip("/")
+            if not prefix.endswith("/"):
+                prefix = f"{prefix}/"
+
+        endpoint_url = os.environ.get("AWS_ENDPOINT_URL") or os.environ.get("STORAGE_ENDPOINT_URL")
+        force_path_style = os.environ.get("AWS_S3_FORCE_PATH_STYLE", "")
+        public_base_url = os.environ.get("STORAGE_PUBLIC_BASE_URL")
+
+        session_kwargs = {"region_name": region}
+        profile = os.environ.get("AWS_PROFILE")
+        if profile:
+            session_kwargs["profile_name"] = profile
+
+        session = boto3.session.Session(**session_kwargs)
+
+        client_kwargs = {"region_name": region}
+        if endpoint_url:
+            client_kwargs["endpoint_url"] = endpoint_url
+        if Config and force_path_style.lower() in {"1", "true", "yes", "on"}:
+            client_kwargs["config"] = Config(s3={"addressing_style": "path"})  # type: ignore[arg-type]
+
+        s3 = session.client("s3", **client_kwargs)
 
         class S3Storage(StorageService):
             def generate_upload_url(self, key: str, content_type: Optional[str] = None, expires_s: int = 900):
@@ -92,7 +125,7 @@ def get_storage(raw_root: Path) -> StorageService:
                     ExpiresIn=int(expires_s),
                     HttpMethod='PUT',
                 )
-                headers = { 'Content-Type': content_type } if content_type else {}
+                headers = {'Content-Type': content_type} if content_type else {}
                 return url, headers
 
             def confirm_object(self, key: str) -> dict:
@@ -100,7 +133,11 @@ def get_storage(raw_root: Path) -> StorageService:
                 try:
                     head = s3.head_object(Bucket=bucket, Key=full_key)
                     return {"exists": True, "size_bytes": head.get('ContentLength')}
-                except Exception:
+                except Exception as exc:
+                    if ClientError and isinstance(exc, ClientError):
+                        code = exc.response.get("Error", {}).get("Code")
+                        if code in {"404", "NoSuchKey"}:
+                            return {"exists": False}
                     return {"exists": False}
 
             def generate_download_url(self, key: str, expires_s: int = 900) -> Optional[str]:
@@ -117,6 +154,13 @@ def get_storage(raw_root: Path) -> StorageService:
                 tmp = Path(tempfile.gettempdir()) / f"bl_tmp_{os.getpid()}_{Path(key).name}"
                 s3.download_file(bucket, full_key, str(tmp))
                 return tmp
+
+            def get_public_url(self, key: str) -> Optional[str]:
+                if public_base_url:
+                    base = public_base_url.rstrip('/')
+                    full_key = f"{prefix}{key}" if prefix else key
+                    return f"{base}/{full_key}"
+                return None
 
         return S3Storage()
     if backend in ("azure", "gcs"):

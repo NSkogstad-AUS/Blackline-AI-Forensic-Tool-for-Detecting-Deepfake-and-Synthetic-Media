@@ -1,0 +1,116 @@
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: bl_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: blackline
+      POSTGRES_USER: blackline
+      POSTGRES_PASSWORD: blackline
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U blackline -d blackline"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Optional: pgAdmin UI at http://localhost:5050 (user: admin@local / admin)
+  pgadmin:
+    image: dpage/pgadmin4:8.10
+    container_name: bl_pgadmin
+    restart: unless-stopped
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@local
+      PGADMIN_DEFAULT_PASSWORD: admin
+    ports:
+      - "5050:80"
+    depends_on:
+      - postgres
+    profiles: ["devtools"]
+
+  # MinIO provides an S3-compatible endpoint for local testing.
+  minio:
+    image: quay.io/minio/minio:RELEASE.2024-09-22T00-33-43Z
+    container_name: bl_minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    profiles: ["object-storage"]
+
+  # One-shot job to ensure the bucket exists when using MinIO locally.
+  minio-init:
+    image: minio/mc:RELEASE.2024-09-18T17-49-14Z
+    container_name: bl_minio_init
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      STORAGE_BUCKET: ${STORAGE_BUCKET:-blackline-dev}
+    entrypoint: >-
+      /bin/sh -c "
+        mc alias set local http://minio:9000 $${MINIO_ROOT_USER} $${MINIO_ROOT_PASSWORD} &&
+        mc mb -p local/$${STORAGE_BUCKET} || true
+      "
+    profiles: ["object-storage"]
+
+  # FastAPI backend (dev-friendly). Choose Dockerfile.lite for faster builds.
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.lite
+    container_name: bl_api
+    restart: unless-stopped
+    environment:
+      # App
+      PORT: "8000"
+      BL_JWT_SECRET: ${BL_JWT_SECRET:-dev-secret-change-me}
+      # Database connects to the postgres service by name
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg2://blackline:blackline@postgres:5432/blackline}
+      # Storage backend: set to 's3' to use AWS S3 presigned uploads; 'local' keeps files on volume
+      STORAGE_BACKEND: ${STORAGE_BACKEND:-local}
+      STORAGE_BUCKET: ${STORAGE_BUCKET:-}
+      AWS_REGION: ${AWS_REGION:-}
+      STORAGE_PREFIX: ${STORAGE_PREFIX:-}
+      AWS_ENDPOINT_URL: ${AWS_ENDPOINT_URL:-}
+      AWS_S3_FORCE_PATH_STYLE: ${AWS_S3_FORCE_PATH_STYLE:-}
+      STORAGE_PUBLIC_BASE_URL: ${STORAGE_PUBLIC_BASE_URL:-}
+      # AWS credentials (if using S3). Recommend supplying via an optional .env file and not committing it.
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_SESSION_TOKEN: ${AWS_SESSION_TOKEN:-}
+      # Data root lives in container at /app/backend/data; also served at /data for some endpoints
+      DATA_ROOT: /app/backend/data
+      STORAGE_BACKEND_LOG_LEVEL: ${STORAGE_BACKEND_LOG_LEVEL:-}
+    volumes:
+      # Persist analysis data / uploads locally
+      - ./backend/data:/app/backend/data
+      # Optionally mount models if you have them locally (uncomment next line)
+      # - ./backend/models:/app/backend/models
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+    driver: local
+  minio-data:
+    driver: local

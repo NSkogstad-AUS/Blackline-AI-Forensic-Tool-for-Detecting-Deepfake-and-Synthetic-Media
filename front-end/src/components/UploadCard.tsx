@@ -3,7 +3,7 @@ import { persistFile, loadFile, removeFile as removePersistedFile } from '../uti
 import { upsertAnalysis, deleteAnalyses } from '../state/analysisStore';
 import "./UploadCard.css";
 import "./UploadCard.override.css";
-import { analyzeAsset as analyzeAssetById, getUploadUrl, confirmUpload } from '../utils/assetsApi';
+import { analyzeAsset as analyzeAssetById, getUploadUrl, confirmUpload, uploadAsset } from '../utils/assetsApi';
 import { getAuthState } from '../state/authStore';
 
 const ACCEPT = ".jpg,.jpeg,.png,.gif,.mp4,.avi";
@@ -551,22 +551,33 @@ const UploadCard: React.FC<UploadCardProps> = ({ pageKey }) => {
     try {
       const token = getAuthState().token;
       if (token) {
-        // Use S3 presigned upload + confirm + analyze-by-asset
+        // Authenticated path: prefer presigned upload when supported; otherwise fall back to direct POST /api/assets
   setItems(prev => prev.map(it => it.id === id ? { ...it, jobId, usedModel: model } : it));
         // Start polling progress emitted by backend analyze/asset
         startProgressPolling(id, jobId);
-        // 1) get upload url
-        const { key, upload_url, headers } = await getUploadUrl(file.name, file.type || 'application/octet-stream');
-        const h = new Headers(headers || {});
-        if (!h.get('Content-Type')) h.set('Content-Type', file.type || 'application/octet-stream');
-        // 2) PUT to S3
-        const putRes = await fetch(upload_url, { method: 'PUT', headers: h, body: file });
-        if (!putRes.ok) throw new Error(`Upload failed: ${putRes.status}`);
-        // 3) confirm
-        const asset = await confirmUpload(key, file.name, file.type || undefined);
+        let assetId: number | null = null;
+        try {
+          // 1) get upload url (S3 or object storage)
+          const { key, upload_url, headers } = await getUploadUrl(file.name, file.type || 'application/octet-stream');
+          const h = new Headers(headers || {});
+          if (!h.get('Content-Type')) h.set('Content-Type', file.type || 'application/octet-stream');
+          // 2) PUT to S3
+          const putRes = await fetch(upload_url, { method: 'PUT', headers: h, body: file });
+          if (!putRes.ok) throw new Error(`Upload failed: ${putRes.status}`);
+          // 3) confirm -> returns Asset
+          const asset = await confirmUpload(key, file.name, file.type || undefined);
+          assetId = asset.id as number;
+        } catch (err: any) {
+          // Fallback for local storage or when presigned uploads are not supported
+          const msg = (err && (err.message || '')) || '';
+          const shouldFallback = msg.includes('Presigned upload not supported') || msg.includes('/api/assets');
+          if (!shouldFallback) throw err;
+          const asset = await uploadAsset(file);
+          assetId = (asset as any).id as number;
+        }
         // 4) analyze by asset id (includes job id for progress)
   setItems(prev => prev.map(it => it.id === id ? { ...it, status: 'analyzing', progress: Math.max(it.progress, 100), stage: 'processing', stageMsg: 'Processing on server', analyzeStartAt: it.analyzeStartAt || Date.now(), usedModel: it.usedModel || model } : it));
-        const data = await analyzeAssetById(asset.id, model, jobId);
+        const data = await analyzeAssetById(assetId as number, model, jobId);
   setItems(prev => prev.map(it => it.id === id ? { ...it, status: 'done', progress: 100, stage: 'done', stageMsg: 'Completed', result: data, error: null, xhr: undefined, analyzeStartAt: undefined, usedModel: it.usedModel || model } : it));
         try { pollStopsRef.current[id]?.(); delete pollStopsRef.current[id]; } catch {}
         try { setDoneToast({ id, name: file.name }); setTimeout(() => setDoneToast(null), 6000); } catch {}

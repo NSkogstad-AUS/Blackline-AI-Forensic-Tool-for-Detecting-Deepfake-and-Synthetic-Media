@@ -1,0 +1,17 @@
+.login-page{min-height:100vh;display:flex;align-items:flex-start;justify-content:center;background:#f3f4f6;padding:24px;padding-top:10vh}
+:root.dark .login-page{background:#0f172a}
+.login-card{width:100%;max-width:420px;background:#fff;border:1px solid #e5e7eb;border-radius:12px;box-shadow:0 10px 24px rgba(12,12,20,0.08);padding:20px}
+:root.dark .login-card{background:#0f172a;border-color:var(--border)}
+.login-card h1{margin:0 0 8px 0;font-size:20px}
+.login-note{font-size:13px;color:#6b7280;margin-bottom:12px}
+.login-toggle{display:flex;gap:8px;margin-bottom:10px}
+.lp-btn{background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:8px 10px;font-weight:700;font-size:13px;cursor:pointer}
+.lp-btn.small{padding:6px 8px;font-size:12px}
+.lp-btn.primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+.lp-btn.wide{width:100%}
+.login-form{display:flex;flex-direction:column;gap:10px;margin-top:6px}
+.lp-field{display:flex;flex-direction:column;gap:6px;font-size:13px}
+.lp-field input{padding:8px 10px;border:1px solid #e5e7eb;border-radius:8px;background:#fff}
+:root.dark .lp-field input{background:#0f172a;border-color:var(--border);color:#e5e7eb}
+.lp-error{background:#fee2e2;color:#991b1b;border:1px solid #fecaca;border-radius:8px;padding:8px 10px;font-size:12px}
+/* disclaimer removed */

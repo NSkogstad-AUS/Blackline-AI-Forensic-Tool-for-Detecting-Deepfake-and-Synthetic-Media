@@ -21,11 +21,12 @@ interface SidebarProps {
   onReorder?: (fromKey: string, toIndex: number) => void;
   onChangeIcon?: (key: string, icon?: string) => void;
   pages: { key: string; label: string; icon?: string }[];
+  isAdmin?: boolean;
 }
 
 // pages are provided by the parent (App) so the sidebar reflects dynamic additions
 
-const Sidebar: React.FC<SidebarProps> = ({ active, onNavigate, onAddPage, onDeletePage, onBulkDelete, onRenamePage, onReorder, onChangeIcon, pages }) => {
+const Sidebar: React.FC<SidebarProps> = ({ active, onNavigate, onAddPage, onDeletePage, onBulkDelete, onRenamePage, onReorder, onChangeIcon, pages, isAdmin }) => {
   const [openMenu, setOpenMenu] = useState<string | null>(null);
   const [profileOpen, setProfileOpen] = useState(false);
   const [collapsed, setCollapsed] = useState<boolean>(() => localStorage.getItem('sidebar-collapsed') === '1');
@@ -251,6 +252,18 @@ const Sidebar: React.FC<SidebarProps> = ({ active, onNavigate, onAddPage, onDele
             >
               <span className="sidebar-item-icon" aria-hidden>+</span>
             </button>
+            {/* DB VIEWER compact icon (admins only) */}
+            {isAdmin ? (
+              <button
+                key="__dbviewer_compact"
+                className={`collapsed-icon-btn${active === 'db' ? ' active' : ''}`}
+                title="DB Viewer"
+                aria-label="DB Viewer"
+                onClick={() => onNavigate('db')}
+              >
+                <span className="sidebar-item-icon" aria-hidden>🗄️</span>
+              </button>
+            ) : null}
             {displayedPages.map(item => (
               <button
                 key={item.key}
@@ -289,6 +302,13 @@ const Sidebar: React.FC<SidebarProps> = ({ active, onNavigate, onAddPage, onDele
               <span className="home-add-icon" aria-hidden>+</span>
               <span className="new-bubble">NEW ANALYSIS</span>
             </button>
+            {/* DB VIEWER button for simple in-app DB view (admins only) */}
+            {isAdmin ? (
+              <button className={`home-replace-button${active === 'db' ? ' active' : ''}`} onClick={() => onNavigate('db')}>
+                <span className="home-add-icon" aria-hidden>🗄️</span>
+                <span className="new-bubble">DB VIEWER</span>
+              </button>
+            ) : null}
             {/* Visual separator between actions and the file list */}
             <div className="sidebar-separator" />
             <Droppable droppableId="sidebar-pages">
@@ -464,6 +484,13 @@ const Sidebar: React.FC<SidebarProps> = ({ active, onNavigate, onAddPage, onDele
               <span className="home-add-icon" aria-hidden>+</span>
               <span className="new-bubble">NEW ANALYSIS</span>
             </button>
+            {/* DB VIEWER button when searching (admins only) */}
+            {isAdmin ? (
+              <button className={`home-replace-button${active === 'db' ? ' active' : ''}`} onClick={() => onNavigate('db')}>
+                <span className="home-add-icon" aria-hidden>🗄️</span>
+                <span className="new-bubble">DB VIEWER</span>
+              </button>
+            ) : null}
             {/* Visual separator between actions and the search results */}
             <div className="sidebar-separator" />
             {/* bulk action bar shown when there are selected items */}

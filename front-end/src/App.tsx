@@ -5,11 +5,13 @@ import Sidebar from "./components/Sidebar";
 import Dashboard from "./pages/Dashboard";
 import FileAnalysis from "./pages/FileAnalysis";
 import Reports from "./pages/Reports";
+import DbViewer from "./pages/DbViewer";
 import SectionHeader from "./components/SectionHeader";
 import React, { useEffect, useState } from "react";
 import { refreshUser, subscribe as authSubscribe, getAuthState } from './state/authStore';
 import NewAnalysisModal from "./components/NewAnalysisModal";
 import { getPages as apiGetPages, putPages as apiPutPages } from './utils/assetsApi';
+import Login from "./pages/Login";
 
 
 const App: React.FC = () => {
@@ -347,11 +349,24 @@ const App: React.FC = () => {
 		});
 	};
 
+	// Access control: guests must login for non-dashboard pages
+	const isAuthed = !!auth.user && !!auth.token;
+	const requiresAuth = page !== 'dashboard';
+
 	let content;
 	if (page === "dashboard") {
 		content = <Dashboard pages={pages} />;
 	} else if (page === "reports") {
 		content = <Reports filePage={lastFilePage} />;
+	} else if (page === "db") {
+		if (!isAuthed) {
+			return <Login targetPage={page} />;
+		}
+		if (auth.user?.plan !== 'Admin') {
+			content = <div className="admin-only-msg">Admins only</div>;
+		} else {
+			content = <DbViewer />;
+		}
 	} else if (page.startsWith("file")) {
 		// derive label from pages state (covers dynamically added pages)
 		const pageEntry = pages.find((p) => p.key === page);
@@ -367,10 +382,15 @@ const App: React.FC = () => {
 		content = <Home />;
 	}
 
+		// If a non-dashboard page is requested and user is not authenticated, show full-screen login
+		if (requiresAuth && !isAuthed) {
+			return <Login targetPage={page} />;
+		}
+
 		return (
 			<div className="app-layout">
 				{/* if we're on reports, keep the sidebar highlighting the last visited file */}
-				<Sidebar active={page === 'reports' ? lastFilePage : page} onNavigate={navigate} onAddPage={addPage} onDeletePage={deletePage} onBulkDelete={deletePages} onRenamePage={renamePage} onReorder={reorderPages} onChangeIcon={changeIcon} pages={pages} />
+				<Sidebar active={page === 'reports' ? lastFilePage : page} onNavigate={navigate} onAddPage={addPage} onDeletePage={deletePage} onBulkDelete={deletePages} onRenamePage={renamePage} onReorder={reorderPages} onChangeIcon={changeIcon} pages={pages} isAdmin={auth.user?.plan === 'Admin'} />
 				{/* Compute next label dynamically so first page starts at 1 and fills gaps */}
 				<NewAnalysisModal isOpen={isNewModalOpen} defaultName={`FILE ANALYSIS ${computeNextIndex(pages)}`} onClose={() => setIsNewModalOpen(false)} onCreate={createPage} />
 				<main className="main-content">

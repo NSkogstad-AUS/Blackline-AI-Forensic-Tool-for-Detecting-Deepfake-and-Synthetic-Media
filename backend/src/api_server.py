@@ -1547,6 +1547,39 @@ def signup(req: SignupRequest, db: Session = Depends(get_db)):
 def me(user = Depends(get_current_user)):
     return {"user": to_public(user).dict()}
 
+# ------------------------- Dev: Simple DB Viewer ---------------------------
+# Read-only list of users for local verification. Requires authentication.
+def _require_admin(user):
+    if not user or str(getattr(user, "plan", "")).lower() != "admin":
+        raise HTTPException(status_code=403, detail="Admins only")
+    return user
+
+@app.get("/api/dev/users")
+def list_users(db: Session = Depends(get_db), user = Depends(get_current_user)):
+    _require_admin(user)
+    try:
+        rows = db.query(models_db.User).all()
+        return {"users": [to_public(u).dict() for u in rows]}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to list users: {e}")
+
+class SetPlanReq(BaseModel):
+    plan: str
+
+@app.post("/api/admin/users/{username}/plan")
+def set_user_plan(username: str, body: SetPlanReq, db: Session = Depends(get_db), user = Depends(get_current_user)):
+    _require_admin(user)
+    plan_val = body.plan.strip()
+    if plan_val not in ("Admin", "Guest"):
+        raise HTTPException(status_code=400, detail="Invalid plan; must be 'Admin' or 'Guest'")
+    target = db.query(models_db.User).filter(models_db.User.username == username).first()
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    target.plan = plan_val
+    db.add(target)
+    db.commit()
+    return {"ok": True, "user": to_public(target).dict()}
+
 # ------------------------- Frame Extraction -------------------------------
 @app.get("/api/frame")
 def get_frame(sha256: str, stored_path: str, index: int | None = None, time_s: float | None = None):

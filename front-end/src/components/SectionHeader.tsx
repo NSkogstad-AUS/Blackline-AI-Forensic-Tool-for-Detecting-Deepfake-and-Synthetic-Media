@@ -3,6 +3,7 @@ import "../pages/FileAnalysis.css";
 import "./Sidebar.css"; // reuse item-menu styles
 import ConfirmDialog from "./ConfirmDialog";
 import IconPickerModal from "./IconPickerModal";
+import { subscribe, getAuthState } from "../state/authStore";
 
 interface Props {
   currentPage: string;
@@ -21,6 +22,7 @@ const SectionHeader: React.FC<Props> = ({ currentPage, onNavigate, lastFilePage,
   const [confirmOpen, setConfirmOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const [iconPickerOpen, setIconPickerOpen] = useState(false);
+  const [isAdmin, setIsAdmin] = useState<boolean>(() => (getAuthState().user?.plan === 'Admin'));
 
   const activeKey = currentPage && currentPage.startsWith('file') ? currentPage : (lastFilePage || 'file1');
 
@@ -34,6 +36,12 @@ const SectionHeader: React.FC<Props> = ({ currentPage, onNavigate, lastFilePage,
     return () => document.removeEventListener('mousedown', onDocClick);
   }, []);
 
+  // Reactively reflect auth role changes (e.g., after login/signup)
+  useEffect(() => {
+    const unsub = subscribe((s) => setIsAdmin(s.user?.plan === 'Admin'));
+    return () => { unsub(); };
+  }, []);
+
   const requestDelete = () => {
     setMenuOpen(false);
     setConfirmOpen(true);
@@ -42,6 +50,11 @@ const SectionHeader: React.FC<Props> = ({ currentPage, onNavigate, lastFilePage,
   return (
     <div className="page-content">
       <div className="file-analysis-header">
+        {isAdmin && (
+          <div className="role-badge" aria-label="Admin role" title="Admin">
+            Admin
+          </div>
+        )}
         <div className="file-analysis-title">
           {(currentPage.startsWith('file') || currentPage === 'reports') && (
             <span
