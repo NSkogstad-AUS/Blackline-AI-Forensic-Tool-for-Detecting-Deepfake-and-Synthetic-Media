@@ -162,3 +162,65 @@ def ensure_seed_user(db: Session):
         )
         db.add(u)
         db.commit()
+
+# ---------------------------------------------------------------------------
+# Debug admin seeding (for development only)
+# ---------------------------------------------------------------------------
+
+def _env_truthy(name: str, default: str = "1") -> bool:
+    v = os.environ.get(name, default)
+    return str(v).strip().lower() in {"1", "true", "yes", "on"}
+
+def debug_admin_username() -> str:
+    return os.environ.get("BL_DEBUG_ADMIN_USER", "admin")
+
+def is_debug_admin_username(username: str | None) -> bool:
+    if not username:
+        return False
+    try:
+        return str(username).strip().lower() == debug_admin_username().strip().lower()
+    except Exception:
+        return False
+
+def ensure_debug_admin(db: Session):
+    """Create or update a persistent Admin user for debugging.
+
+    Controlled by env:
+      - BL_ENABLE_DEBUG_ADMIN: default '1' (enabled). Set to '0' to disable.
+      - BL_DEBUG_ADMIN_USER: default 'admin'
+      - BL_DEBUG_ADMIN_EMAIL: default 'admin@local'
+      - BL_DEBUG_ADMIN_PASSWORD: default 'admin'
+    """
+    if not _env_truthy("BL_ENABLE_DEBUG_ADMIN", "1"):
+        return
+    uname = os.environ.get("BL_DEBUG_ADMIN_USER", "admin")
+    email = os.environ.get("BL_DEBUG_ADMIN_EMAIL", "admin@local")
+    pw = os.environ.get("BL_DEBUG_ADMIN_PASSWORD", "admin")
+    rec = db.query(User).filter(User.username == uname).first()
+    now = int(time.time())
+    if rec is None:
+        rec = User(
+            username=uname,
+            email=email,
+            password_hash=hash_password(pw),
+            plan="Admin",
+            created_at=now,
+        )
+        db.add(rec)
+        db.commit()
+    else:
+        # Ensure it stays Admin and sync email if changed; update password if env changed
+        changed = False
+        if rec.plan != "Admin":
+            rec.plan = "Admin"; changed = True
+        if email and rec.email != email:
+            rec.email = email; changed = True
+        try:
+            # Update password only if a non-empty env was provided
+            if pw:
+                rec.password_hash = hash_password(pw); changed = True
+        except Exception:
+            pass
+        if changed:
+            db.add(rec)
+            db.commit()

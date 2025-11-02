@@ -34,6 +34,18 @@ const Login: React.FC<LoginProps> = ({ targetPage }) => {
     } finally { setPending(false); }
   }
 
+  async function continueAsGuest() {
+    setPending(true); setError(null);
+    try {
+      // Uses seeded demo account (username: guest, password: guest)
+      await doLogin('guest', 'guest');
+    } catch (e: any) {
+      setError(e.message || 'Guest login failed');
+    } finally {
+      setPending(false);
+    }
+  }
+
   const heading = auth.user ? 'Welcome back' : (mode==='login' ? 'Sign in' : 'Create your account');
   return (
     <div className="login-page" role="main">
@@ -62,6 +74,12 @@ const Login: React.FC<LoginProps> = ({ targetPage }) => {
           {auth.error && !error && <div className="lp-error" role="alert">{auth.error}</div>}
           <button className="lp-btn primary wide" disabled={pending}>{pending ? (mode==='login' ? 'Logging in…' : 'Creating…') : (mode==='login' ? 'Login' : 'Create Account')}</button>
         </form>
+        <div className="login-guest">
+          <div className="guest-sep" aria-hidden>or</div>
+          <button className="lp-btn wide" onClick={continueAsGuest} disabled={pending} title="Continue as guest (limited access)">
+            {pending ? 'Please wait…' : 'Continue as Guest'}
+          </button>
+        </div>
       </div>
     </div>
   );
