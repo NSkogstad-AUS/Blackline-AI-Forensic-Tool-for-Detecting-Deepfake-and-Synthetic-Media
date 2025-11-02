@@ -89,6 +89,7 @@ python -m backend.src.models.ela_detector.compute_ela `
   --jpeg-quality 85 `
   --scale 10 `
   --limit 200
+  
 
 # 9a) ELA over raw sampled frames (often stronger)
 python -m backend.src.models.ela_detector.compute_ela `
@@ -110,13 +111,6 @@ python -m backend.src.models.ela_detector.eval_ela `
   --metric ela_error_mean `
   --out .\backend\data\derived\ela_eval_cv.json
 
-# 10) Copy-Move detection (deprecated in your note, kept for reference)
-python -m backend.src.models.compute_copy_move `
-  --frames   .\backend\data\derived\frames_normalized.jsonl `
-  --root     .\backend\data\derived\normalized `
-  --out      .\backend\data\derived\frames_copy_move.jsonl `
-  --overlays .\backend\data\derived\overlays `
-  --limit 200
 
 # 11) Noise analysis over normalized frames (quick test)
 python -m backend.src.models.noise_detector.compute_noise `
