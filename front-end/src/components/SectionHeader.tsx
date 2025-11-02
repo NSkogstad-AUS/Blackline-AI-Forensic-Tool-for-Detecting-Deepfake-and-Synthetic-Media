@@ -10,6 +10,8 @@ interface Props {
   onNavigate: (p: string) => void;
   lastFilePage?: string;
   title?: string;
+  // Hide Documents/Reports tabs (e.g., on DB Viewer page)
+  hideTabs?: boolean;
   onDeleteCurrent?: (key: string) => void;
   // Optional emoji/icon to show to the left of the title, kept in sync with the sidebar icon
   icon?: string;
@@ -17,12 +19,13 @@ interface Props {
   onChangeIcon?: (key: string, icon?: string) => void;
 }
 
-const SectionHeader: React.FC<Props> = ({ currentPage, onNavigate, lastFilePage, title, onDeleteCurrent, icon, onChangeIcon }) => {
+const SectionHeader: React.FC<Props> = ({ currentPage, onNavigate, lastFilePage, title, hideTabs, onDeleteCurrent, icon, onChangeIcon }) => {
   const [menuOpen, setMenuOpen] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const [iconPickerOpen, setIconPickerOpen] = useState(false);
-  const [isAdmin, setIsAdmin] = useState<boolean>(() => (getAuthState().user?.plan === 'Admin'));
+  const initialPlan = getAuthState().user?.plan || null;
+  const [plan, setPlan] = useState<string | null>(initialPlan);
 
   const activeKey = currentPage && currentPage.startsWith('file') ? currentPage : (lastFilePage || 'file1');
 
@@ -38,7 +41,7 @@ const SectionHeader: React.FC<Props> = ({ currentPage, onNavigate, lastFilePage,
 
   // Reactively reflect auth role changes (e.g., after login/signup)
   useEffect(() => {
-    const unsub = subscribe((s) => setIsAdmin(s.user?.plan === 'Admin'));
+    const unsub = subscribe((s) => setPlan(s.user?.plan || null));
     return () => { unsub(); };
   }, []);
 
@@ -50,9 +53,9 @@ const SectionHeader: React.FC<Props> = ({ currentPage, onNavigate, lastFilePage,
   return (
     <div className="page-content">
       <div className="file-analysis-header">
-        {isAdmin && (
-          <div className="role-badge" aria-label="Admin role" title="Admin">
-            Admin
+        {plan && (
+          <div className="role-badge" aria-label={`${plan} role`} title={plan}>
+            {plan}
           </div>
         )}
         <div className="file-analysis-title">
@@ -66,7 +69,7 @@ const SectionHeader: React.FC<Props> = ({ currentPage, onNavigate, lastFilePage,
           )}
           {title || 'Dashboard'}
         </div>
-        {currentPage !== 'dashboard' && (
+        {currentPage !== 'dashboard' && !hideTabs && (
           <div className="file-analysis-tabs">
             <div className={`file-analysis-tab ${currentPage && currentPage.startsWith('file') ? 'active' : ''}`} onClick={() => onNavigate(lastFilePage || 'file1')}>Documents</div>
             <div className={`file-analysis-tab ${currentPage === 'reports' ? 'active' : ''}`} onClick={() => onNavigate('reports')}>Reports</div>

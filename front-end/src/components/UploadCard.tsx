@@ -62,9 +62,10 @@ interface UploadItem {
 
 interface UploadCardProps { pageKey?: string }
 const STORAGE_PREFIX = 'bl_uploadItems_';
-// Versioned per-page storage (v3) so each analysis page retains its own uploads
-const STORAGE_VERSION = 'v3';
-// In-memory cache of File blobs keyed by composite (pageKey::itemId)
+// Versioned per-page storage (v4) and namespaced by user to prevent
+// cross-user leakage when different users reuse the same page keys (e.g., file1).
+const STORAGE_VERSION = 'v4';
+// In-memory cache of File blobs keyed by composite (user::pageKey::itemId)
 const memoryFilesGlobal: Record<string, File> = {};
 
 const UploadCard: React.FC<UploadCardProps> = ({ pageKey }) => {
@@ -327,7 +328,10 @@ const UploadCard: React.FC<UploadCardProps> = ({ pageKey }) => {
     return null;
   }
 
-  const storageKey = pageKey ? `${STORAGE_PREFIX}${pageKey}_${STORAGE_VERSION}` : `${STORAGE_PREFIX}__global_${STORAGE_VERSION}`;
+  const username = (getAuthState().user?.username || 'guest');
+  const storageKey = pageKey
+    ? `${STORAGE_PREFIX}${username}_${pageKey}_${STORAGE_VERSION}`
+    : `${STORAGE_PREFIX}${username}__global_${STORAGE_VERSION}`;
 
   // hydrate once per *page* (pageKey) from localStorage
   useEffect(() => {
@@ -337,7 +341,7 @@ const UploadCard: React.FC<UploadCardProps> = ({ pageKey }) => {
         const slimArr: SlimItem[] = raw ? (JSON.parse(raw) as any) : [];
         if (!Array.isArray(slimArr)) return;
         const restored: UploadItem[] = await Promise.all(slimArr.map(async si => {
-          const compositeId = pageKey ? `${pageKey}::${si.id}` : si.id;
+          const compositeId = pageKey ? `${username}::${pageKey}::${si.id}` : `${username}::${si.id}`;
             const file = memoryFilesGlobal[compositeId] || await loadFile(compositeId);
             if (file) memoryFilesGlobal[compositeId] = file;
             // Drop any non-persistent blob: previews stored from older sessions
@@ -420,7 +424,7 @@ const UploadCard: React.FC<UploadCardProps> = ({ pageKey }) => {
         if (it.preview && it.preview.startsWith('blob:')) { try { URL.revokeObjectURL(it.preview); } catch {} }
         return { ...it, file: f, name: f.name, mime: f.type, preview: null, status: 'idle', progress: 0, result: null, error: null };
       }));
-  const composite = pageKey ? `${pageKey}::${replaceId}` : replaceId;
+  const composite = pageKey ? `${username}::${pageKey}::${replaceId}` : `${username}::${replaceId}`;
   memoryFilesGlobal[composite] = f;
   persistFile(composite, f);
   replaceTargetId.current = null;
@@ -436,7 +440,7 @@ const UploadCard: React.FC<UploadCardProps> = ({ pageKey }) => {
       const preview = null;
       const id = `${Date.now()}_${i}_${f.name}`;
       filesRef.current[id] = f;
-      const composite = pageKey ? `${pageKey}::${id}` : id;
+      const composite = pageKey ? `${username}::${pageKey}::${id}` : `${username}::${id}`;
       memoryFilesGlobal[composite] = f;
       persistFile(composite, f);
       newItems.push({

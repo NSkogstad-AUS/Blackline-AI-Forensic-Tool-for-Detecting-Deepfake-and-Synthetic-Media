@@ -115,6 +115,8 @@ def analyze_record(rec: Dict[str, Any]) -> Dict[str, Any]:
             nb_streams = None
     if not nb_streams or nb_streams <= 0:
         add_check(checks, "FAIL_NOSTREAMS", "FAIL", "nb_streams <= 0")
+    else:
+        add_check(checks, "STREAMS_PRESENT", "PASS", f"nb_streams={nb_streams}")
     ps = to_float(container.get("probe_score"))
     if ps is not None and ps < 50:
         add_check(checks, "WARN_PROBE_SCORE", "WARN", f"low probe_score={ps}")
@@ -126,6 +128,7 @@ def analyze_record(rec: Dict[str, Any]) -> Dict[str, Any]:
     v = pick_primary_video(streams)
     video = {}
     if v:
+        add_check(checks, "VIDEO_PRESENT", "PASS", f"codec={v.get('codec_name')}")
         video = {
             "index": v.get("index"),
             "codec_name": v.get("codec_name"),
@@ -167,10 +170,14 @@ def analyze_record(rec: Dict[str, Any]) -> Dict[str, Any]:
             expected_frames = fps * duration
             if rel_diff(nb_frames, expected_frames) > 0.02:
                 add_check(checks, "WARN_TIMING", "WARN", "frame count vs duration mismatch")
+            else:
+                add_check(checks, "TIMING_OK", "PASS", "frame count consistent with duration")
         afr = parse_rate(v.get("avg_frame_rate"))
         rfr = parse_rate(v.get("r_frame_rate"))
         if afr and rfr and rel_diff(afr, rfr) > 0.01:
             add_check(checks, "WARN_VFR", "WARN", "avg_frame_rate differs from r_frame_rate")
+        elif afr and rfr:
+            add_check(checks, "VFR_OK", "PASS", "frame rates agree")
         st = to_float(v.get("start_time"))
         if st is not None and abs(st) > 0.5:
             add_check(checks, "WARN_START_TIME", "WARN", f"start_time={st}")
@@ -187,6 +194,8 @@ def analyze_record(rec: Dict[str, Any]) -> Dict[str, Any]:
         dar_tag = parse_ratio(v.get("display_aspect_ratio"))
         if dar_expected and dar_tag and rel_diff(dar_expected, dar_tag) > 0.02:
             add_check(checks, "WARN_DAR", "WARN", "display_aspect_ratio mismatch")
+        elif dar_expected and dar_tag:
+            add_check(checks, "DAR_OK", "PASS", "aspect ratio coherent")
         cw, ch = to_float(v.get("coded_width")), to_float(v.get("coded_height"))
         if (cw and w and cw < w) or (ch and h and ch < h):
             add_check(checks, "WARN_CROPPING", "WARN", "coded_* smaller than displayed dims")
@@ -230,6 +239,8 @@ def analyze_record(rec: Dict[str, Any]) -> Dict[str, Any]:
                 add_check(checks, "WARN_BITRATE_LOW", "WARN", f"bpp={bpp:.4f}")
             elif bpp > 0.25:
                 add_check(checks, "WARN_BITRATE_HIGH", "WARN", f"bpp={bpp:.4f}")
+            else:
+                add_check(checks, "BITRATE_OK", "PASS", f"bpp={bpp:.4f}")
 
     # 8) Audio streams quick sanity
     audio_out: List[Dict[str, Any]] = []
@@ -251,6 +262,8 @@ def analyze_record(rec: Dict[str, Any]) -> Dict[str, Any]:
         ch_ok = a.get("channels") in {1, 2}
         if not (sr_ok and ch_ok):
             add_check(checks, "WARN_AUDIO", "WARN", "audio sample_rate/channels unusual")
+        else:
+            add_check(checks, "AUDIO_OK", "PASS", "audio stream typical")
 
     # 9) Provenance & re-encode fingerprints
     prov = {
@@ -320,6 +333,8 @@ def analyze_record(rec: Dict[str, Any]) -> Dict[str, Any]:
     fmt_dur = to_float(fmt.get("duration"))
     if exif_dur and fmt_dur and rel_diff(exif_dur, fmt_dur) > 0.05:
         add_check(checks, "WARN_DURATION", "WARN", "exif.Duration vs format.duration")
+    elif exif_dur and fmt_dur:
+        add_check(checks, "DURATION_OK", "PASS", "exif duration matches container")
 
     # 11) One cross-check bundle
     if v:
@@ -349,6 +364,8 @@ def analyze_record(rec: Dict[str, Any]) -> Dict[str, Any]:
                 unexpected.append(k)
         if unexpected:
             add_check(checks, "WARN_DISPOSITION", "WARN", ",".join(unexpected))
+        else:
+            add_check(checks, "DISPOSITION_NORMAL", "PASS", "no unusual flags")
 
     # 13) Summarize & score
     fps = parse_rate(v.get("avg_frame_rate") or v.get("r_frame_rate")) if v else None
@@ -419,5 +436,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-
 

@@ -21,3 +21,19 @@ front-end/dist/
 **/.mypy_cache
 **/.pytest_cache
 **/.ruff_cache
+
+# Exclude large data and artifacts from backend to keep build context small
+backend/data/
+backend/data/**
+backend/tests/
+backend/**/tmp/
+backend/models/
+backend/models/**
+
+# Exclude miscellaneous caches and large assets
+**/.cache/
+**/.gradle/
+**/.vscode/
+**/*.mp4
+**/*.mov
+**/*.avi

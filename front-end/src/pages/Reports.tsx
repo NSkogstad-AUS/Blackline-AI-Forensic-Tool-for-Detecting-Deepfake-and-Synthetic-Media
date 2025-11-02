@@ -170,6 +170,33 @@ const Reports: React.FC<{ filePage?: string }> = ({ filePage }) => {
   // Add state for selected card
   const [selectedCardId, setSelectedCardId] = useState<string | undefined>(undefined);
 
+  // Metadata checks state
+  const [metaLoading, setMetaLoading] = useState<boolean>(false);
+  const [metaError, setMetaError] = useState<string | null>(null);
+  const [metaData, setMetaData] = useState<any | null>(null);
+  const runMetadataChecks = async (useExif: boolean = false) => {
+    const rawAsset = (selected as any)?.raw?.asset as any;
+    const assetId = rawAsset?.asset_id as number | undefined;
+    if (!assetId) { setMetaError('Metadata checks require a persisted asset.'); setMetaData(null); return; }
+    setMetaLoading(true); setMetaError(null);
+    try {
+      const tok = getAuthState().token;
+      const res = await fetch(`${API_BASE}/api/metadata/checks`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(tok ? { Authorization: `Bearer ${tok}` } : {}) },
+        body: JSON.stringify({ asset_id: assetId, no_exif: !useExif }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      const data = await res.json();
+      setMetaData(data);
+    } catch (e: any) {
+      setMetaError(e?.message || 'Failed to run metadata checks');
+      setMetaData(null);
+    } finally {
+      setMetaLoading(false);
+    }
+  };
+
   // Jump the source video to a specific time
   const jumpToTime = React.useCallback((t: number, autoPlay = false) => {
     const v = videoRef.current;
@@ -445,9 +472,22 @@ const Reports: React.FC<{ filePage?: string }> = ({ filePage }) => {
       const m = a.summary.deepfake_method || 'unknown';
       modelMap[m] = (modelMap[m]||0)+1;
     });
-    // sparkline series by time
+    // sparkline series by time (kept for potential future use)
     const series = [...analyses].sort((a,b)=> a.analyzedAt - b.analyzedAt).map(a=> a.summary.deepfake_likelihood || 0);
-    return { total, avgLikelihood, maxLikelihood, suspicious, hist, modelMap, series };
+    // top N files by likelihood
+    const top = [...analyses]
+      .sort((a,b)=> (b.summary.deepfake_likelihood||0) - (a.summary.deepfake_likelihood||0))
+      .slice(0,5)
+      .map(a => ({ file: a.fileName, pct: ((a.summary.deepfake_likelihood||0)*100) }));
+    // average stats
+    const avgDuration = analyses.reduce((s,a)=> s + (a.summary.duration_s || 0),0)/total;
+    const resMap: Record<string, number> = {};
+    analyses.forEach(a => {
+      const w = a.summary.width, h = a.summary.height;
+      if (!w || !h) return; const k = `${w}x${h}`; resMap[k] = (resMap[k]||0)+1;
+    });
+    const commonResolution = Object.entries(resMap).sort((a,b)=> b[1]-a[1])[0]?.[0] || '—';
+    return { total, avgLikelihood, maxLikelihood, suspicious, hist, modelMap, series, top, avgDuration, commonResolution };
   }, [analyses]);
 
   // Apply sorting whenever list or sort state changes
@@ -670,12 +710,25 @@ const Reports: React.FC<{ filePage?: string }> = ({ filePage }) => {
             </div>
             <div className="viz-grid">
               <div className="viz-card">
-                <div className="viz-title">Likelihood Trend</div>
-                <Sparkline values={aggregate.series} />
+                <div className="viz-title">Top Files by Likelihood</div>
+                <div className="table-wrap">
+                  <table className="dbv-table">
+                    <thead><tr><th>File</th><th>Likelihood</th></tr></thead>
+                    <tbody>
+                      {aggregate.top.map((t,i)=> (
+                        <tr key={i}><td title={t.file}>{t.file}</td><td>{t.pct.toFixed(1)}%</td></tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
               <div className="viz-card">
-                <div className="viz-title">Likelihood Distribution</div>
-                <HistogramBars bins={aggregate.hist} />
+                <div className="viz-title">Average Stats</div>
+                <div className="stats-grid">
+                  <div className="stat-row"><span className="label">Avg Duration</span><span className="value">{Number.isFinite(aggregate.avgDuration) ? `${aggregate.avgDuration.toFixed(2)}s` : '—'}</span></div>
+                  <div className="stat-row"><span className="label">Common Resolution</span><span className="value">{aggregate.commonResolution}</span></div>
+                  <div className="stat-row"><span className="label">Avg Likelihood</span><span className="value">{(aggregate.avgLikelihood*100).toFixed(1)}%</span></div>
+                </div>
               </div>
               <div className="viz-card">
                 <div className="viz-title">Models Used</div>
@@ -1784,6 +1837,57 @@ const Reports: React.FC<{ filePage?: string }> = ({ filePage }) => {
                                   </details>
                                 );
                               })()}
+                              {/* Metadata checks */}
+                              {(() => {
+                                const rawAsset = (selected as any)?.raw?.asset as any;
+                                const assetId = rawAsset?.asset_id as number | undefined;
+                                return (
+                                  <details className="overlay-block">
+                                    <summary>Metadata checks</summary>
+                                    <div className="overlay-content">
+                                      {!assetId && <div className="muted">Available for saved uploads only.</div>}
+                                      {assetId && (
+                                        <div className="controls-bar">
+                                          <button className="btn" onClick={()=>runMetadataChecks(false)} disabled={metaLoading}>{metaLoading ? 'Running…' : 'Run (fast)'}</button>
+                                          <button className="btn ghost" onClick={()=>runMetadataChecks(true)} disabled={metaLoading} title="Includes EXIF if exiftool is available">{metaLoading ? 'Running…' : 'Run with EXIF'}</button>
+                                        </div>
+                                      )}
+                                      {metaError && <div className="error-box">{metaError}</div>}
+                                      {metaData && (
+                                        <div className="meta-block">
+                                          <div className="table-wrap">
+                                            <table className="dbv-table">
+                                              <thead>
+                                                <tr><th>Status</th><th>Code</th><th>Reason</th></tr>
+                                              </thead>
+                                              <tbody>
+                                                {(() => {
+                                                  const rows = Array.isArray(metaData.checks) ? metaData.checks : [];
+                                                  if (!rows.length) {
+                                                    return (
+                                                      <tr>
+                                                        <td colSpan={3} className="dbv-empty">No metadata anomalies detected. Try “Run with EXIF” for deeper checks.</td>
+                                                      </tr>
+                                                    );
+                                                  }
+                                                  return rows.map((c:any, i:number)=> (
+                                                    <tr key={i} className={String(c.status || '').toLowerCase()}>
+                                                      <td>{c.status || '—'}</td>
+                                                      <td>{c.code || '—'}</td>
+                                                      <td>{c.reason || '—'}</td>
+                                                    </tr>
+                                                  ));
+                                                })()}
+                                              </tbody>
+                                            </table>
+                                          </div>
+                                        </div>
+                                      )}
+                                    </div>
+                                  </details>
+                                );
+                              })()}
+
                               {selected.raw && (
                                 <details className="raw-block">
                                   <summary>Raw JSON</summary>

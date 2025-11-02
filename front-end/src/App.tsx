@@ -11,6 +11,8 @@ import React, { useEffect, useState } from "react";
 import { refreshUser, subscribe as authSubscribe, getAuthState } from './state/authStore';
 import NewAnalysisModal from "./components/NewAnalysisModal";
 import { getPages as apiGetPages, putPages as apiPutPages } from './utils/assetsApi';
+import { clearAnalysesForPage } from './state/analysisStore';
+import { clearPageUploads } from './utils/uploadPersistence';
 import Login from "./pages/Login";
 
 
@@ -239,7 +241,7 @@ const App: React.FC = () => {
 		setPages((prev) => {
 			const nextIdx = computeNextIndex(prev);
 			const newKey = `file${nextIdx}`;
-			const next = [...prev, { key: newKey, label: name, icon }];
+            const next = [...prev, { key: newKey, label: name, icon }];
 			// Persist immediately to avoid any refresh race
 			try { savePagesForUser(next); } catch {}
 			// Push to backend if authenticated
@@ -248,7 +250,7 @@ const App: React.FC = () => {
 			setIsNewModalOpen(false);
 			setLastFilePage(newKey);
 			setPage(newKey);
-			return next;
+            return next;
 		});
 	};
 //basic
@@ -261,6 +263,9 @@ const App: React.FC = () => {
 					pushPages(next);
 					return next;
 				});
+                // Clear any persisted uploads and analyses tied to this page (local only)
+                try { clearAnalysesForPage(key); } catch {}
+                try { const u = getAuthState().user?.username || 'guest'; clearPageUploads(key, u); } catch {}
 				// if the deleted page was the lastFilePage, switch to the first available file page (if any)
 				setLastFilePage((prev) => {
 					if (prev !== key) return prev;
@@ -287,6 +292,11 @@ const App: React.FC = () => {
 					pushPages(next);
 					return next;
 				});
+                // Clear persisted uploads/analyses for each removed page
+                try {
+                  const u = getAuthState().user?.username || 'guest';
+                  keys.forEach(k => { try { clearAnalysesForPage(k); } catch {}; try { clearPageUploads(k, u); } catch {} });
+                } catch {}
 				// if any deleted page was the lastFilePage, switch to first available file page (if any)
 				setLastFilePage((prev) => {
 					if (prev && keySet.has(prev)) {
@@ -349,9 +359,8 @@ const App: React.FC = () => {
 		});
 	};
 
-	// Access control: guests must login for non-dashboard pages
-	const isAuthed = !!auth.user && !!auth.token;
-	const requiresAuth = page !== 'dashboard';
+    // Access control: require authentication for all pages (including dashboard)
+    const isAuthed = !!auth.user && !!auth.token;
 
 	let content;
 	if (page === "dashboard") {
@@ -382,10 +391,10 @@ const App: React.FC = () => {
 		content = <Home />;
 	}
 
-		// If a non-dashboard page is requested and user is not authenticated, show full-screen login
-		if (requiresAuth && !isAuthed) {
-			return <Login targetPage={page} />;
-		}
+    // If user is not authenticated, always show full-screen login first
+    if (!isAuthed) {
+        return <Login targetPage={page} />;
+    }
 
 		return (
 			<div className="app-layout">
@@ -395,23 +404,26 @@ const App: React.FC = () => {
 				<NewAnalysisModal isOpen={isNewModalOpen} defaultName={`FILE ANALYSIS ${computeNextIndex(pages)}`} onClose={() => setIsNewModalOpen(false)} onCreate={createPage} />
 				<main className="main-content">
 				{ /* determine header title and icon: if viewing a file page, show its label and icon; for reports, use last file page's label and icon; otherwise Dashboard with no icon */ }
-			<SectionHeader
-				currentPage={page}
-				onNavigate={navigate}
-				lastFilePage={lastFilePage}
-				onDeleteCurrent={deletePage}
-				onChangeIcon={changeIcon}
-				title={
-					page.startsWith('file')
-					    ? (pages.find(p => p.key === page)?.label || 'File Analysis')
-					    : (page === 'reports' ? (pages.find(p => p.key === lastFilePage)?.label || 'Reports') : 'Dashboard')
-				}
-				icon={
-					page.startsWith('file')
-					  ? (pages.find(p => p.key === page)?.icon || '📁')
-					  : (page === 'reports' ? (pages.find(p => p.key === lastFilePage)?.icon || '📁') : undefined)
-				}
-			/>
+            <SectionHeader
+                currentPage={page}
+                onNavigate={navigate}
+                lastFilePage={lastFilePage}
+                onDeleteCurrent={deletePage}
+                onChangeIcon={changeIcon}
+                title={
+                    page.startsWith('file')
+                        ? (pages.find(p => p.key === page)?.label || 'File Analysis')
+                        : (page === 'reports'
+                            ? (pages.find(p => p.key === lastFilePage)?.label || 'Reports')
+                            : (page === 'db' ? 'Database Viewer' : 'Dashboard'))
+                }
+                icon={
+                    page.startsWith('file')
+                      ? (pages.find(p => p.key === page)?.icon || '📁')
+                      : (page === 'reports' ? (pages.find(p => p.key === lastFilePage)?.icon || '📁') : undefined)
+                }
+                hideTabs={page === 'db'}
+            />
 					{content}
 					</main>
 			</div>

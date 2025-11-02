@@ -4,7 +4,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     MODELS_DIR=/app/backend/models
 
-# System deps for OpenCV runtime
+# System deps for OpenCV runtime + ffmpeg + exiftool
 RUN apt-get update \
      && apt-get install -y --no-install-recommends \
          libgl1 \
@@ -13,6 +13,7 @@ RUN apt-get update \
          libxext6 \
          libgomp1 \
          ffmpeg \
+         libimage-exiftool-perl \
      && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

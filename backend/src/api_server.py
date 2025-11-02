@@ -37,17 +37,19 @@ from .audit import append_audit_row, DEFAULT_INGEST_LOG
 from .probe_media import probe_asset
 from .validate_media import validate_asset
 from .utils import summarize_ffprobe
+from .utils import ffprobe_json, exiftool_json
 from .models.df_detector import predict_deepfake
 # Note: heavy DL modules (torch/transformers) are imported lazily inside the route handler
 # Optional heavy/experimental models are imported lazily within route handlers
 # to avoid startup failures in environments where the files or dependencies
 # are not present (e.g., Cloud Run minimal images).
-from .auth import handle_login, handle_signup, get_current_user, to_public, SignupRequest
+from .auth import handle_login, handle_signup, get_current_user, to_public, SignupRequest, ensure_debug_admin, is_debug_admin_username
 from .db import init_db, get_db
 from . import models_db  # ensure models are imported
 from sqlalchemy.orm import Session
 from fastapi import Request
 from .storage import get_storage
+from .analyze_metadata import analyze_record as analyze_metadata_record
 
 # Use writable data root; on Cloud Run the image FS is read-only except /tmp
 _default_data_root = "/tmp/data" if os.getenv("PORT") else "backend/data"
@@ -93,6 +95,11 @@ def on_startup():
     from sqlalchemy.orm import Session
     for db in get_db():  # use dependency generator to get a session
         ensure_seed_user(db)
+        # Ensure a persistent debug admin (optional; enabled by env)
+        try:
+            ensure_debug_admin(db)
+        except Exception:
+            pass
         break
 
 @app.get("/status")
@@ -485,6 +492,68 @@ class LBPGenerateReq(BaseModel):
     frames: int | None = 12
     radius: int | None = 1
     threshold: float | None = None
+
+# -------------------------- Metadata Checks -------------------------------
+class MetadataReq(BaseModel):
+    asset_id: int
+    no_exif: bool | None = True
+
+@app.post("/api/metadata/checks")
+def metadata_checks(req: MetadataReq, user = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Run structured metadata checks (container/stream/exif heuristics) for an asset.
+
+    Returns the output of analyze_metadata.analyze_record, which includes:
+      { identity, container, video, audio, provenance, checks[], score, summary }
+    """
+    # Lookup asset authorization
+    a = db.query(models_db.Asset).filter(models_db.Asset.id == req.asset_id, models_db.Asset.user_id == user.id).one_or_none()
+    if not a:
+        raise HTTPException(status_code=404, detail="Asset not found")
+
+    # Resolve path (local or remote)
+    stored_path = a.stored_path
+    abspath = None
+    temp_download = None
+    if stored_path:
+        abspath = RAW_ROOT / stored_path
+        if not abspath.exists() and a.remote_key:
+            try:
+                temp_download = STORAGE.download_to_temp(a.remote_key)
+                abspath = temp_download
+            except Exception as e:
+                raise HTTPException(status_code=500, detail=f"Failed to retrieve remote asset: {e}")
+    elif a.remote_key:
+        try:
+            temp_download = STORAGE.download_to_temp(a.remote_key)
+            abspath = temp_download
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to retrieve remote asset: {e}")
+    else:
+        raise HTTPException(status_code=400, detail="Asset has no stored path")
+
+    try:
+        # ffprobe/exiftool are optional; function returns None if tools missing
+        ffj = ffprobe_json(Path(abspath))
+        exj = None if (req.no_exif is True) else exiftool_json(Path(abspath))
+        rec = {
+            "asset_id": a.id,
+            "sha256": a.sha256,
+            "stored_path": stored_path or (Path(abspath).name if abspath else None),
+            "store_root": str(RAW_ROOT),
+            "mime": a.mime,
+            "probe": ffj,
+            "exif": exj,
+            "when": __import__('time').strftime("%Y-%m-%dT%H:%M:%SZ", __import__('time').gmtime()),
+            "tool_versions": {},
+        }
+        out = analyze_metadata_record(rec)
+        return out
+    finally:
+        try:
+            if temp_download and Path(temp_download).exists():
+                Path(temp_download).unlink()
+        except Exception:
+            pass
 
 @app.post("/api/lbp/generate")
 def generate_lbp_frames(req: LBPGenerateReq, user = Depends(get_current_user), db: Session = Depends(get_db)):
@@ -1572,6 +1641,9 @@ def set_user_plan(username: str, body: SetPlanReq, db: Session = Depends(get_db)
     plan_val = body.plan.strip()
     if plan_val not in ("Admin", "Guest"):
         raise HTTPException(status_code=400, detail="Invalid plan; must be 'Admin' or 'Guest'")
+    # Do not allow changing the special debug admin user
+    if is_debug_admin_username(username) and plan_val != "Admin":
+        raise HTTPException(status_code=400, detail="Cannot change plan of debug admin user")
     target = db.query(models_db.User).filter(models_db.User.username == username).first()
     if not target:
         raise HTTPException(status_code=404, detail="User not found")
