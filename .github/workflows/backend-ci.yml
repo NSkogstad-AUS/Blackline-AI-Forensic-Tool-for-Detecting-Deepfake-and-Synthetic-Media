@@ -1,0 +1,73 @@
+name: Backend CI
+
+on:
+  push:
+    paths:
+      - 'backend/**'
+  pull_request:
+    paths:
+      - 'backend/**'
+
+jobs:
+  test:
+    name: Unit tests (fast)
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        # Use Python versions compatible with modern numpy/opencv wheels (>=3.10)
+        python-version: ['3.10', '3.11']
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ matrix.python-version }}-${{ hashFiles('**/backend/requirements-lite.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-${{ matrix.python-version }}-
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          # prefer lightweight requirements for unit tests
+          if [ -f backend/requirements-lite.txt ]; then \
+            pip install -r backend/requirements-lite.txt; \
+          else \
+            pip install -r backend/requirements.txt; \
+          fi
+          pip install pytest pytest-cov
+
+      - name: Run unit tests (pytest)
+        run: |
+          # run tests excluding integration-marked tests
+          pytest -q backend/tests -m "not integration" --junitxml=pytest-results.xml --cov=backend --cov-report=xml
+
+      - name: Upload pytest results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-results-${{ matrix.python-version }}
+          path: pytest-results.xml
+
+      - name: Upload test logs (fallback)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-test-logs-${{ matrix.python-version }}
+          path: backend/tests
+
+      - name: Upload coverage to Codecov
+        if: always()
+        uses: codecov/codecov-action@v4
+        with:
+          files: coverage.xml
+          fail_ci_if_error: false
+          token: ${{ secrets.CODECOV_TOKEN }}
